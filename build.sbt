@@ -3,6 +3,9 @@ import BuildHelper._
 val ZioVersion       = "2.0.20"
 val H2Version        = "2.2.224"
 val ZioSchemaVersion = "0.4.16"
+val ZioJsonVersion           = "0.4.2"
+val ZioTestContainersVersion = "0.9.0"
+val PostgresqlVersion        = "42.5.4"
 
 name := "zio-jdbc"
 
@@ -40,12 +43,15 @@ lazy val core = project
   .settings(stdSettings("zio-jdbc"))
   .settings(
     libraryDependencies ++= Seq(
-      "dev.zio"       %% "zio"          % ZioVersion,
-      "dev.zio"       %% "zio-streams"  % ZioVersion,
-      "dev.zio"       %% "zio-schema"   % ZioSchemaVersion,
-      "dev.zio"       %% "zio-test"     % ZioVersion % Test,
-      "dev.zio"       %% "zio-test-sbt" % ZioVersion % Test,
-      "com.h2database" % "h2"           % H2Version  % Test
+      "dev.zio"               %% "zio"                               % ZioVersion,
+      "dev.zio"               %% "zio-streams"                       % ZioVersion,
+      "dev.zio"               %% "zio-schema"                        % ZioSchemaVersion,
+      "dev.zio"               %% "zio-json"                          % ZioJsonVersion           % Test,
+      "dev.zio"               %% "zio-test"                          % ZioVersion               % Test,
+      "dev.zio"               %% "zio-test-sbt"                      % ZioVersion               % Test,
+      "com.h2database"         % "h2"                                % H2Version                % Test,
+      "io.github.scottweaver" %% "zio-2-0-testcontainers-postgresql" % ZioTestContainersVersion % Test,
+      "org.postgresql"         % "postgresql"                        % PostgresqlVersion        % Test
     ),
     Test / fork := true,
     run / fork  := true
