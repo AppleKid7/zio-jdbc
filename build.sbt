@@ -46,6 +46,8 @@ lazy val core = project
       "dev.zio"               %% "zio"                               % ZioVersion,
       "dev.zio"               %% "zio-streams"                       % ZioVersion,
       "dev.zio"               %% "zio-schema"                        % ZioSchemaVersion,
+      "dev.zio"               %% "zio-schema-derivation"             % ZioSchemaVersion,
+      "dev.zio"               %% "zio-schema-json"                   % ZioSchemaVersion         % Test,
       "dev.zio"               %% "zio-json"                          % ZioJsonVersion           % Test,
       "dev.zio"               %% "zio-test"                          % ZioVersion               % Test,
       "dev.zio"               %% "zio-test-sbt"                      % ZioVersion               % Test,

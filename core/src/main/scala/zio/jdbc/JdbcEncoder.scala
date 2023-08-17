@@ -654,6 +654,57 @@ trait JdbcEncoder0LowPriorityImplicits { self =>
       case _                           => throw JdbcEncoderError(s"Unsupported type: $standardType", new IllegalArgumentException)
     }
 
+  import zio.schema.Deriver
+  val deriver = new Deriver[JdbcEncoder] {
+    def deriveRecord[A](
+      record: Schema.Record[A],
+      fields: => Chunk[Deriver.WrappedF[JdbcEncoder, _]],
+      summoned: => Option[JdbcEncoder[A]]
+    ): JdbcEncoder[A] = (value: A) => {
+      val test = record.fields.zip(fields).foldLeft[SqlFragment](sql""""""""){
+        case (acc, (schemaField@Schema.Field(_, _, _, _, get, _), field)) =>
+          // if (acc == "")
+          //   sql"""${field.unwrap.asInstanceOf[JdbcEncoder[Any]].encode(get(value))}"""
+          // else
+          acc ++ (if (acc == "") "" else ", ") ++ sql"""${field.unwrap.asInstanceOf[JdbcEncoder[Any]].encode(get(value))}"""
+      }
+      test
+    }
+
+    def deriveEnum[A](
+      `enum`: Schema.Enum[A],
+      cases: => Chunk[Deriver.WrappedF[JdbcEncoder, _]],
+      summoned: => Option[JdbcEncoder[A]]
+    ): JdbcEncoder[A] = ???
+
+    def derivePrimitive[A](st: StandardType[A], summoned: => Option[JdbcEncoder[A]]): JdbcEncoder[A] = ???
+    def deriveOption[A](
+      option: Schema.Optional[A],
+      inner: => JdbcEncoder[A],
+      summoned: => Option[JdbcEncoder[Option[A]]]
+    ): JdbcEncoder[Option[A]] = ???
+
+    def deriveSequence[C[_], A](
+      sequence: Schema.Sequence[C[A], A, _],
+      inner: => JdbcEncoder[A],
+      summoned: => Option[JdbcEncoder[C[A]]]
+    ): JdbcEncoder[C[A]] = ???
+
+    def deriveMap[K, V](
+      map: Schema.Map[K, V],
+      key: => JdbcEncoder[K],
+      value: => JdbcEncoder[V],
+      summoned: => Option[JdbcEncoder[Map[K, V]]]
+    ): JdbcEncoder[Map[K, V]] = ???
+
+    def deriveTransformedRecord[A, B](
+      record: Schema.Record[A],
+      transform: Schema.Transform[A, B, _],
+      fields: => Chunk[Deriver.WrappedF[JdbcEncoder, _]],
+      summoned: => Option[JdbcEncoder[B]]
+    ): JdbcEncoder[B] = ???
+  }
+
   //scalafmt: { maxColumn = 325, optIn.configStyleArguments = false }
   def fromSchema[A](implicit schema: Schema[A]): JdbcEncoder[A] =
     schema match {
