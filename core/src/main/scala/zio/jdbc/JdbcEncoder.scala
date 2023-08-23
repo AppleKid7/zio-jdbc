@@ -660,29 +660,39 @@ trait JdbcEncoder0LowPriorityImplicits { self =>
       record: Schema.Record[A],
       fields: => Chunk[Deriver.WrappedF[JdbcEncoder, _]],
       summoned: => Option[JdbcEncoder[A]]
-    ): JdbcEncoder[A] = (value: A) => {
-      val test = record.fields.zip(fields).foldLeft[SqlFragment](sql""""""""){
-        case (acc, (schemaField@Schema.Field(_, _, _, _, get, _), field)) =>
-          // if (acc == "")
-          //   sql"""${field.unwrap.asInstanceOf[JdbcEncoder[Any]].encode(get(value))}"""
-          // else
+    ): JdbcEncoder[A] = (value: A) =>
+      record.fields.zip(fields).foldLeft[SqlFragment](sql""""""""){
+        case (acc, (Schema.Field(_, _, _, _, get, _), field)) =>
           acc ++ (if (acc == "") "" else ", ") ++ sql"""${field.unwrap.asInstanceOf[JdbcEncoder[Any]].encode(get(value))}"""
       }
-      test
-    }
 
     def deriveEnum[A](
       `enum`: Schema.Enum[A],
       cases: => Chunk[Deriver.WrappedF[JdbcEncoder, _]],
       summoned: => Option[JdbcEncoder[A]]
-    ): JdbcEncoder[A] = ???
+    ): JdbcEncoder[A] = (value: A) =>
+      // TODO - check if it should be construct or unsafeDeconstruct
+      // TODO - don't do anything with annotations, schema, or id?
+      `enum`.cases.zip(cases).foldLeft[SqlFragment](sql"""""""){
+        case (acc, (enumCase@Schema.Case(_, _, unsafeDeconstruct, _, isCase, _), c)) =>
+          if (isCase(value))
+            acc ++ (if (acc == "") "" else ", ") ++ sql"""${c.unwrap.asInstanceOf[JdbcEncoder[Any]].encode(unsafeDeconstruct(value))}"""
+          else
+            acc
+      }
 
     def derivePrimitive[A](st: StandardType[A], summoned: => Option[JdbcEncoder[A]]): JdbcEncoder[A] = ???
+
     def deriveOption[A](
       option: Schema.Optional[A],
       inner: => JdbcEncoder[A],
       summoned: => Option[JdbcEncoder[Option[A]]]
-    ): JdbcEncoder[Option[A]] = ???
+    ): JdbcEncoder[Option[A]] = (value: Option[A]) =>
+      value match {
+        case None => sql"""""""
+        case Some(value) =>
+          inner.encode(value)
+      }
 
     def deriveSequence[C[_], A](
       sequence: Schema.Sequence[C[A], A, _],
@@ -703,7 +713,7 @@ trait JdbcEncoder0LowPriorityImplicits { self =>
       fields: => Chunk[Deriver.WrappedF[JdbcEncoder, _]],
       summoned: => Option[JdbcEncoder[B]]
     ): JdbcEncoder[B] = ???
-  }
+  }.autoAcceptSummoned
 
   //scalafmt: { maxColumn = 325, optIn.configStyleArguments = false }
   def fromSchema[A](implicit schema: Schema[A]): JdbcEncoder[A] =
