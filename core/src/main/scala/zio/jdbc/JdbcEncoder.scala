@@ -656,32 +656,74 @@ trait JdbcEncoder0LowPriorityImplicits { self =>
 
   import zio.schema.Deriver
   val deriver = new Deriver[JdbcEncoder] {
+    // TODO: replace sql"""""" with SqlFragment.nullLiteral
+    // ", " with SqlFragment.comma and append with ++
     def deriveRecord[A](
       record: Schema.Record[A],
       fields: => Chunk[Deriver.WrappedF[JdbcEncoder, _]],
       summoned: => Option[JdbcEncoder[A]]
     ): JdbcEncoder[A] = (value: A) =>
-      record.fields.zip(fields).foldLeft[SqlFragment](sql""""""""){
+      record.fields.zip(fields).foldLeft[SqlFragment](sql"""""""") {
         case (acc, (Schema.Field(_, _, _, _, get, _), field)) =>
-          acc ++ (if (acc == "") "" else ", ") ++ sql"""${field.unwrap.asInstanceOf[JdbcEncoder[Any]].encode(get(value))}"""
+          acc ++ (if (acc == "") "" else ", ") ++ sql"""${field.unwrap
+            .asInstanceOf[JdbcEncoder[Any]]
+            .encode(get(value))}"""
       }
+
+    def deriveTransformedRecord[A, B](
+      record: Schema.Record[A],
+      transform: Schema.Transform[A, B, _],
+      fields: => Chunk[Deriver.WrappedF[JdbcEncoder, _]],
+      summoned: => Option[JdbcEncoder[B]]
+    ): JdbcEncoder[B] = (value: B) =>
+      record.fields.zip(fields).foldLeft[SqlFragment](sql"""""""") {
+        case (acc, (Schema.Field(_, _, _, _, get, _), field)) =>
+          transform.g(value) match {
+            case Right(value) =>
+              acc ++ (if (acc == "") "" else ", ") ++ sql"""${field.unwrap
+                .asInstanceOf[JdbcEncoder[Any]]
+                .encode(get(value))}"""
+            case Left(_)      => SqlFragment.nullLiteral
+          }
+      }
+
+    // def deriveTransformedRecord[A, B](
+    //   record: Schema.Record[A],
+    //   transform: Schema.Transform[A, B, _],
+    //   fields: => Chunk[Deriver.WrappedF[JdbcEncoder, _]],
+    //   summoned: => Option[JdbcEncoder[B]]
+    // ): JdbcEncoder[B] = (value: A) =>
+    //   record.fields.zip(fields).foldLeft[SqlFragment](sql"""""""") {
+    //     case (acc, (Schema.Field(_, _, _, _, get, _), field)) =>
+    //       transform.f(value) match {
+    //         case Right(value) =>
+    //           acc ++ (if (acc == "") "" else ", ") ++ sql"""${field.unwrap
+    //             .asInstanceOf[JdbcEncoder[Any]]
+    //             .encode(get(value))}"""
+    //         case Left(_)      => SqlFragment.nullLiteral
+    //       }
+    //   }
 
     def deriveEnum[A](
       `enum`: Schema.Enum[A],
       cases: => Chunk[Deriver.WrappedF[JdbcEncoder, _]],
       summoned: => Option[JdbcEncoder[A]]
     ): JdbcEncoder[A] = (value: A) =>
-      // TODO - check if it should be construct or unsafeDeconstruct
-      // TODO - don't do anything with annotations, schema, or id?
-      `enum`.cases.zip(cases).foldLeft[SqlFragment](sql"""""""){
-        case (acc, (enumCase@Schema.Case(_, _, unsafeDeconstruct, _, isCase, _), c)) =>
+      `enum`.cases.zip(cases).foldLeft[SqlFragment](sql""""""") {
+        case (acc, (enumCase @ Schema.Case(_, _, unsafeDeconstruct, _, isCase, _), c)) =>
           if (isCase(value))
-            acc ++ (if (acc == "") "" else ", ") ++ sql"""${c.unwrap.asInstanceOf[JdbcEncoder[Any]].encode(unsafeDeconstruct(value))}"""
+            acc ++ (if (acc == "") "" else ", ") ++ sql"""${c.unwrap
+              .asInstanceOf[JdbcEncoder[Any]]
+              .encode(unsafeDeconstruct(value))}"""
           else
             acc
       }
 
-    def derivePrimitive[A](st: StandardType[A], summoned: => Option[JdbcEncoder[A]]): JdbcEncoder[A] = ???
+    def derivePrimitive[A](
+      st: StandardType[A],
+      summoned: => Option[JdbcEncoder[A]]
+    ): JdbcEncoder[A] = (value: A) =>
+      primitiveCodec(st).encode(value)
 
     def deriveOption[A](
       option: Schema.Optional[A],
@@ -689,7 +731,7 @@ trait JdbcEncoder0LowPriorityImplicits { self =>
       summoned: => Option[JdbcEncoder[Option[A]]]
     ): JdbcEncoder[Option[A]] = (value: Option[A]) =>
       value match {
-        case None => sql"""""""
+        case None        => sql"""""""
         case Some(value) =>
           inner.encode(value)
       }
@@ -698,21 +740,21 @@ trait JdbcEncoder0LowPriorityImplicits { self =>
       sequence: Schema.Sequence[C[A], A, _],
       inner: => JdbcEncoder[A],
       summoned: => Option[JdbcEncoder[C[A]]]
-    ): JdbcEncoder[C[A]] = ???
+    ): JdbcEncoder[C[A]] = (values: C[A]) =>
+      sequence.toChunk(values).foldLeft(sql""""""") { case (acc, value) =>
+        acc ++ (if (acc == "") "" else ", ") ++ sql"""${inner.encode(value)}"""
+      }
 
     def deriveMap[K, V](
       map: Schema.Map[K, V],
       key: => JdbcEncoder[K],
       value: => JdbcEncoder[V],
       summoned: => Option[JdbcEncoder[Map[K, V]]]
-    ): JdbcEncoder[Map[K, V]] = ???
-
-    def deriveTransformedRecord[A, B](
-      record: Schema.Record[A],
-      transform: Schema.Transform[A, B, _],
-      fields: => Chunk[Deriver.WrappedF[JdbcEncoder, _]],
-      summoned: => Option[JdbcEncoder[B]]
-    ): JdbcEncoder[B] = ???
+    ): JdbcEncoder[Map[K, V]] = (values: Map[K, V]) =>
+      values.foldLeft(SqlFragment.nullLiteral) { case (acc, (k, v)) =>
+        acc ++ (if (acc == SqlFragment.nullLiteral) SqlFragment.nullLiteral else SqlFragment.comma) ++ sql"""${key
+          .encode(k)}: ${value.encode(v)}"""
+      }
   }.autoAcceptSummoned
 
   //scalafmt: { maxColumn = 325, optIn.configStyleArguments = false }
