@@ -3,38 +3,13 @@ package zio.jdbc
 import com.dimafeng.testcontainers.PostgreSQLContainer
 import io.github.scottweaver.zio.testcontainers.postgres.ZPostgreSQLContainer
 import zio._
-import zio.json._
 import zio.schema._
-// import zio.test.Assertion._
 import zio.test.TestAspect._
 import zio.test._
+
 import java.sql.Connection
 import io.github.scottweaver.models.JdbcInfo
 import org.postgresql.ds.PGSimpleDataSource
-
-// test("json schema-derived") {
-//                 for {
-//                   _     <- /*createJsonAlias *>*/ createTransactions *> insertTransfer
-//                   value <- transaction {
-//                              val to = transactionTransfer.data
-//                                .asInstanceOf[Json.JObject]
-//                                .fields
-//                                .toMap
-//                                .get("to")
-//                                .map(_.asInstanceOf[Json.JString].s)
-//                                .getOrElse("")
-//                              //sql"select data from transactions where data ~* \'to:\s*${to}\'"
-//                              //sql"select data from transactions where regexp_like(data, \'to:${to}\')"
-//                              // sql"select data from transactions where data->$$.to = ${to}"
-//                              sql"select data from transactions where json_value(data, $$.to) = ${to}"
-//                                .query[GenericTransaction](
-//                                  GenericTransaction.jdbcDecoder
-//                                )
-//                                .selectOne
-//                            }
-//                   _     <- Console.printLine(s"@@@@ value: $value")
-//                 } yield assertTrue(value.contains(GenericTransaction(transactionTransfer.data)))
-//               }
 
 object PostgresSpec extends ZIOSpecDefault {
 
@@ -71,115 +46,35 @@ object PostgresSpec extends ZIOSpecDefault {
   val connectionPoolLayer: ZLayer[Props with ZConnectionPoolConfig, Nothing, ZConnectionPool] =
     ZLayer.fromZIO(connectionPool).flatten
 
-  sealed trait Json
-  object Json {
-    case object JNull                                extends Json
-    case class JString(s: String)                    extends Json
-    case class JNumber(l: Int)                       extends Json
-    case class JDecimal(d: Double)                   extends Json
-    case class JObject(fields: List[(String, Json)]) extends Json
-    case class JArray(fields: List[Json])            extends Json
+  case class GenericTransaction(data: zio.json.ast.Json)
+  object GenericTransaction {
+    implicit val schemaJson: Schema[zio.json.ast.Json] = zio.schema.codec.json.schemaJson
 
-    // implicit lazy val schema: Schema.Enum6[_, _, _, _, _, _, Json] =
-    //   DeriveSchema.gen[Json]
-    implicit lazy val schema: Schema[Json] = DeriveSchema.gen[Json]
-
-    implicit val encoder: JsonEncoder[Json] =
-      DeriveJsonEncoder.gen[Json]
-
-    implicit val decoder: JsonDecoder[Json] =
-      DeriveJsonDecoder.gen[Json]
-
-    implicit val jdbcDecoder = JdbcDecoder.fromSchema(schema)
-  }
-
-  final case class GenericTransaction1(data: Json)
-  object GenericTransaction1 {
-    implicit val encoder: JsonEncoder[GenericTransaction1] =
-      DeriveJsonEncoder.gen[GenericTransaction1]
-
-    implicit val decoder: JsonDecoder[GenericTransaction1] =
-      DeriveJsonDecoder.gen[GenericTransaction1]
-
-    val schema = DeriveSchema.gen[GenericTransaction1]
-
-
-    // val schema: Schema[GenericTransaction] =
-    //   Schema.CaseClass1[Json, GenericTransaction](
-    //     TypeId.parse(classOf[GenericTransaction].getName),
-    //     Field("data", Schema[Json], get0 = _.data, set0 = (x, v) => x.copy(data = v)),
-    //     GenericTransaction.apply
-    //   )
-    // val decoder = zio.schema.codec.JsonCodec.JsonDecoder
-
-    // implicit val jdbcDecoder = JdbcDecoder.fromSchema(schema)
-    import Json._
-    // implicit val jdbcDecoder: JdbcDecoder[GenericTransaction1] =
-    //   JdbcDecoder[Json]().map[GenericTransaction1](t => GenericTransaction1(t))
-    implicit val jdbcDecoder = JdbcDecoder.fromSchema(schema)
-
-    implicit val jdbcEncoder: JdbcEncoder[GenericTransaction1] = (value: GenericTransaction1) => {
-      val data = value.data
-      sql"""${data.toJson}"""
-    }
-  }
-
-  final case class Data(to: String, from: String)
-  object Data {
-    implicit val encoder: JsonEncoder[Data] =
-      DeriveJsonEncoder.gen[Data]
-
-    implicit val decoder: JsonDecoder[Data] =
-      DeriveJsonDecoder.gen[Data]
-
-    implicit val jsonSchema = zio.schema.codec.JsonCodec
-
-    val schema = DeriveSchema.gen[Data]
-
-    implicit val jdbcDecoder = JdbcDecoder.fromSchema(schema)
-  }
-
-  final case class GenericTransaction2(data: Data)
-  object GenericTransaction2 {
-    implicit val encoder: JsonEncoder[GenericTransaction2] =
-      DeriveJsonEncoder.gen[GenericTransaction2]
-
-    implicit val decoder: JsonDecoder[GenericTransaction2] =
-      DeriveJsonDecoder.gen[GenericTransaction2]
-
-    implicit val jsonSchema = zio.schema.codec.JsonCodec
-
-    // val schema: Schema[GenericTransaction] =
-    //   Schema.CaseClass1[Json, GenericTransaction](
-    //     TypeId.parse(classOf[GenericTransaction].getName),
-    //     Field("data", Schema[Json], get0 = _.data, set0 = (x, v) => x.copy(data = v)),
-    //     GenericTransaction.apply
-    //   )
-    val schema = DeriveSchema.gen[GenericTransaction2]
-
-    implicit val jdbcDecoder = JdbcDecoder.fromSchema(schema)
-  }
-
-  // val transactionTransfer: GenericTransaction = GenericTransaction(
-  //   Json.Obj(
-  //     Chunk(
-  //       ("to", Json.Str("000000000")),
-  //       ("from", Json.Str("000000001"))
-  //     )
-  //   )
-  // )
-
-  // val transactionTransfer: GenericTransaction2 = GenericTransaction2(Data("000000000", "000000001"))
-  val transactionTransfer: GenericTransaction1 = GenericTransaction1(
-    Json.JObject(
-      List(
-        ("to", Json.JString("000000000")),
-        ("from", Json.JString("000000001"))
+    // implicit val schema: Schema[GenericTransaction] = DeriveSchema.gen[GenericTransaction]
+    implicit val schema: Schema[GenericTransaction] =
+      Schema.CaseClass1[zio.json.ast.Json, GenericTransaction](
+        TypeId.parse(classOf[GenericTransaction].getName),
+        zio.schema.Schema.Field[GenericTransaction, zio.json.ast.Json]("data", schemaJson, get0 = _.data, set0 = (x, v) => x.copy(data = v)),
+        GenericTransaction.apply
       )
+    val deriver: Deriver[JdbcEncoder] = JdbcEncoder.deriver
+//    implicit val jsonJdbcEncoder: JdbcEncoder[zio.json.ast.Json] = Derive.derive[JdbcEncoder, zio.json.ast.Json](deriver)(schemaJson)
+    implicit val jsonJdbcEncoder: JdbcEncoder[zio.json.ast.Json] = JdbcEncoder.fromSchema[zio.json.ast.Json]
+//    implicit val jsonJdbcEncoder: JdbcEncoder[zio.json.ast.Json] = JdbcEncoder.fromSchema[zio.json.ast.Json](schemaJson)
+    implicit val jdbcEncoder: JdbcEncoder[GenericTransaction] = Derive.derive[JdbcEncoder, GenericTransaction](deriver)(schema)
+//    implicit val jdbcEncoder: JdbcEncoder[GenericTransaction] = JdbcEncoder.fromSchema(schema)
+
+    implicit val jdbcDecoder: JdbcDecoder[GenericTransaction] = JdbcDecoder.fromSchema(schema)
+  }
+
+  val transactionTransfer: GenericTransaction = GenericTransaction(
+    zio.json.ast.Json.Obj(
+      "destination" -> zio.json.ast.Json.Str("000000001"),
+      "origin" -> zio.json.ast.Json.Str("000000000")
     )
   )
 
-  val createTransactions: ZIO[ZConnectionPool with Any, Throwable, Unit] =
+  val createTransactions: ZIO[ZConnectionPool, Throwable, Unit] =
     transaction {
       sql"""
       create table transactions (
@@ -189,15 +84,20 @@ object PostgresSpec extends ZIOSpecDefault {
       """.execute
     }
 
-  val insertTransfer: ZIO[ZConnectionPool with Any, Throwable, UpdateResult] =
+  val selectTransaction: SqlFragment =
+    sql"select data from transactions where data ->> 'destination' = '000000001'"
+
+  val insertTransfer: ZIO[ZConnectionPool, Throwable, UpdateResult[Long]] =
     transaction {
-      val data = transactionTransfer.data
-      println(data.toJson)
-      sql"insert into transactions values (default, ${data.toJson}::json)".insert
+//      sql"insert into transactions values (default, ${data.toJson}::json)".insertWithKeys
+      // val sql = SqlFragment.insertInto("transactions")("data").values(transactionTransfer)(GenericTransaction.jdbcEncoder)
+      val sql = SqlFragment.insertInto("transactions")("data").values(transactionTransfer.data)(GenericTransaction.jsonJdbcEncoder)
+      println(s"@@@@ sql: $sql")
+      sql.insertWithKeys
     }
 
   def spec: Spec[TestEnvironment, Any] =
-    suite("ZConnectionPoolSpec integration tests") {
+    suite("PostgresSpec integration tests") {
       suite("Postgresql JSON field test") {
         test("create Json table") {
           for {
@@ -208,26 +108,30 @@ object PostgresSpec extends ZIOSpecDefault {
             for {
               _      <- createTransactions
               result <- insertTransfer
-            } yield assertTrue(result.rowsUpdated == 1L) && assertTrue(result.updatedKeys.nonEmpty)
+              _ <- Console.printLine(s"@@@@ inserting json: ${result.toString}").debug
+            } yield assertTrue(result.rowsUpdated == 1L, result.updatedKeys.nonEmpty)
           } +
           test("json schema-derived") {
-                for {
-                  _     <- createTransactions *> insertTransfer
-                  value <- transaction {
-                            // val to = transactionTransfer.data.to
-                            val to = "000000000"
-                             //sql"select data from transactions where data ~* \'to:\s*${to}\'"
-                             //sql"select data from transactions where regexp_like(data, \'to:${to}\')"
-                            //  sql"select data from transactions where json_value(data, $$.to) = ${to}"
-                            sql"select data from transactions where data ->> 'to' = ${to}"
-                               .query[GenericTransaction1](
-                                 GenericTransaction1.jdbcDecoder
-                               )
-                               .selectAll
-                           }
-                  _ <- ZIO.debug(s"@@@@@ value: $value")
-                } yield assertTrue(value.contains(transactionTransfer))
-              }
+            for {
+              _     <- createTransactions *> insertTransfer
+              value <- transaction {
+                        // val to = transactionTransfer.data.to
+                        // val destination = "000000001"
+                         //sql"select data from transactions where data ~* \'to:\s*${to}\'"
+                         //sql"select data from transactions where regexp_like(data, \'to:${to}\')"
+                        //  sql"select data from transactions where json_value(data, $$.to) = ${to}"
+                        // sql"select data from transactions where data ->> 'destination' = ${destination}"
+                        //   .query[GenericTransaction](
+                        //     GenericTransaction.jdbcDecoder
+                        //   )
+                        //   .selectOne
+                         selectTransaction.query[GenericTransaction](
+                          GenericTransaction.jdbcDecoder  
+                         ).selectOne
+                       }
+              _ <- ZIO.debug(s"@@@@@ value: $value")
+            } yield assertTrue(value.contains(transactionTransfer))
+          }
       }
     }.provide(
       ZPostgreSQLContainer.live,

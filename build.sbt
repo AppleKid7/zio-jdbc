@@ -2,10 +2,11 @@ import BuildHelper._
 
 val ZioVersion       = "2.0.20"
 val H2Version        = "2.2.224"
-val ZioSchemaVersion = "0.4.16"
-val ZioJsonVersion           = "0.4.2"
+val ZioSchemaVersion = "1.1.1" //"1.0.1"
+val ZioJsonVersion           = "0.6.2"
 val ZioTestContainersVersion = "0.9.0"
 val PostgresqlVersion        = "42.5.4"
+val JavaJsonVersion = "20231013"
 
 name := "zio-jdbc"
 
@@ -47,7 +48,8 @@ lazy val core = project
       "dev.zio"               %% "zio-streams"                       % ZioVersion,
       "dev.zio"               %% "zio-schema"                        % ZioSchemaVersion,
       "dev.zio"               %% "zio-schema-derivation"             % ZioSchemaVersion,
-      "dev.zio"               %% "zio-schema-json"                   % ZioSchemaVersion         % Test,
+      "org.json"               % "json"                              % JavaJsonVersion,
+      "dev.zio"               %% "zio-schema-json"                   % ZioSchemaVersion,
       "dev.zio"               %% "zio-json"                          % ZioJsonVersion           % Test,
       "dev.zio"               %% "zio-test"                          % ZioVersion               % Test,
       "dev.zio"               %% "zio-test-sbt"                      % ZioVersion               % Test,
@@ -55,6 +57,8 @@ lazy val core = project
       "io.github.scottweaver" %% "zio-2-0-testcontainers-postgresql" % ZioTestContainersVersion % Test,
       "org.postgresql"         % "postgresql"                        % PostgresqlVersion        % Test
     ),
+    resolvers += "Sonatype OSS Snapshots" at "https://oss.sonatype.org/content/repositories/snapshots",
+    resolvers += "Sonatype OSS Snapshots Custom" at "https://s01.oss.sonatype.org/content/repositories/snapshots",
     Test / fork := true,
     run / fork  := true
   )

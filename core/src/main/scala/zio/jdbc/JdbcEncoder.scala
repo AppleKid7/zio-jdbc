@@ -18,6 +18,8 @@ package zio.jdbc
 import zio.Chunk
 import zio.schema.{ Schema, StandardType }
 
+import scala.reflect.ClassTag
+
 /**
  * A type class that describes the ability to convert a value of type `A` into
  * a fragment of SQL. This is useful for forming SQL insert statements.
@@ -47,6 +49,7 @@ object JdbcEncoder extends JdbcEncoder0LowPriorityImplicits {
   implicit val byteChunkEncoder: JdbcEncoder[Chunk[Byte]]                 = value => sql"$value"
   implicit val blobEncoder: JdbcEncoder[java.sql.Blob]                    = value => sql"$value"
   implicit val uuidEncoder: JdbcEncoder[java.util.UUID]                   = value => sql"$value"
+//  implicit val jsonEncoder: JdbcEncoder[zio.json.ast.Json]                = value => sql"${value.toJson}::json"
 
   implicit def singleParamEncoder[A: SqlFragment.Setter]: JdbcEncoder[A] = value => sql"$value"
 
@@ -655,6 +658,18 @@ trait JdbcEncoder0LowPriorityImplicits { self =>
     }
 
   import zio.schema.Deriver
+//  private sealed trait JdbcEncoderDeriver[F[_]] extends Deriver[F[_]] {
+//    def deriveUnknown[A: ClassTag](summoned: => Option[F[A]]): F[A] = {
+//      val classTag = implicitly[ClassTag[A]]
+//      println(s"===== arrived at deriveUnknown with classTag: $classTag =====")
+//      if (classTag == scala.reflect.classTag[zio.json.ast.Json]) {
+//        new JdbcEncoder[zio.json.ast.Json] {
+//          override def encode(value: zio.json.ast.Json): SqlFragment =
+//            sql"""'${value.toString}'"""
+//        }.asInstanceOf[F[A]]
+//      } else super.deriveUnknown(summoned)
+//    }
+//  }
   val deriver = new Deriver[JdbcEncoder] {
     // TODO: replace sql"""""" with SqlFragment.nullLiteral
     // ", " with SqlFragment.comma and append with ++
@@ -662,13 +677,19 @@ trait JdbcEncoder0LowPriorityImplicits { self =>
       record: Schema.Record[A],
       fields: => Chunk[Deriver.WrappedF[JdbcEncoder, _]],
       summoned: => Option[JdbcEncoder[A]]
-    ): JdbcEncoder[A] = (value: A) =>
+    ): JdbcEncoder[A] = (value: A) => {
+
       record.fields.zip(fields).foldLeft[SqlFragment](sql"""""""") {
         case (acc, (Schema.Field(_, _, _, _, get, _), field)) =>
-          acc ++ (if (acc == "") "" else ", ") ++ sql"""${field.unwrap
-            .asInstanceOf[JdbcEncoder[Any]]
-            .encode(get(value))}"""
+          println("==== Arrived at deriveRecord ====")
+          acc ++ (if (acc == sql"""""""") sql"""""""" else sql""", """) ++
+            sql"""${
+              field.unwrap
+                .asInstanceOf[JdbcEncoder[Any]]
+                .encode(get(value))
+            }"""
       }
+    }
 
     def deriveTransformedRecord[A, B](
       record: Schema.Record[A],
@@ -680,29 +701,12 @@ trait JdbcEncoder0LowPriorityImplicits { self =>
         case (acc, (Schema.Field(_, _, _, _, get, _), field)) =>
           transform.g(value) match {
             case Right(value) =>
-              acc ++ (if (acc == "") "" else ", ") ++ sql"""${field.unwrap
+              acc ++ (if (acc == sql"""""""") sql"""""""" else sql""", """) ++ sql"""${field.unwrap
                 .asInstanceOf[JdbcEncoder[Any]]
                 .encode(get(value))}"""
             case Left(_)      => SqlFragment.nullLiteral
           }
       }
-
-    // def deriveTransformedRecord[A, B](
-    //   record: Schema.Record[A],
-    //   transform: Schema.Transform[A, B, _],
-    //   fields: => Chunk[Deriver.WrappedF[JdbcEncoder, _]],
-    //   summoned: => Option[JdbcEncoder[B]]
-    // ): JdbcEncoder[B] = (value: A) =>
-    //   record.fields.zip(fields).foldLeft[SqlFragment](sql"""""""") {
-    //     case (acc, (Schema.Field(_, _, _, _, get, _), field)) =>
-    //       transform.f(value) match {
-    //         case Right(value) =>
-    //           acc ++ (if (acc == "") "" else ", ") ++ sql"""${field.unwrap
-    //             .asInstanceOf[JdbcEncoder[Any]]
-    //             .encode(get(value))}"""
-    //         case Left(_)      => SqlFragment.nullLiteral
-    //       }
-    //   }
 
     def deriveEnum[A](
       `enum`: Schema.Enum[A],
@@ -712,7 +716,7 @@ trait JdbcEncoder0LowPriorityImplicits { self =>
       `enum`.cases.zip(cases).foldLeft[SqlFragment](sql""""""") {
         case (acc, (enumCase @ Schema.Case(_, _, unsafeDeconstruct, _, isCase, _), c)) =>
           if (isCase(value))
-            acc ++ (if (acc == "") "" else ", ") ++ sql"""${c.unwrap
+            acc ++ (if (acc == sql"""""""") "" else sql""", """) ++ sql"""${c.unwrap
               .asInstanceOf[JdbcEncoder[Any]]
               .encode(unsafeDeconstruct(value))}"""
           else
@@ -722,19 +726,17 @@ trait JdbcEncoder0LowPriorityImplicits { self =>
     def derivePrimitive[A](
       st: StandardType[A],
       summoned: => Option[JdbcEncoder[A]]
-    ): JdbcEncoder[A] = (value: A) =>
-      primitiveCodec(st).encode(value)
+    ): JdbcEncoder[A] = (value: A) => primitiveCodec(st).encode(value)
 
     def deriveOption[A](
       option: Schema.Optional[A],
       inner: => JdbcEncoder[A],
       summoned: => Option[JdbcEncoder[Option[A]]]
-    ): JdbcEncoder[Option[A]] = (value: Option[A]) =>
-      value match {
-        case None        => sql"""""""
-        case Some(value) =>
-          inner.encode(value)
-      }
+    ): JdbcEncoder[Option[A]] = {
+      case None        => sql"""""""
+      case Some(value) =>
+        inner.encode(value)
+    }
 
     def deriveSequence[C[_], A](
       sequence: Schema.Sequence[C[A], A, _],
@@ -742,7 +744,7 @@ trait JdbcEncoder0LowPriorityImplicits { self =>
       summoned: => Option[JdbcEncoder[C[A]]]
     ): JdbcEncoder[C[A]] = (values: C[A]) =>
       sequence.toChunk(values).foldLeft(sql""""""") { case (acc, value) =>
-        acc ++ (if (acc == "") "" else ", ") ++ sql"""${inner.encode(value)}"""
+        acc ++ (if (acc == sql"""""""") sql"""""""" else sql""", """) ++ sql"""${inner.encode(value)}"""
       }
 
     def deriveMap[K, V](
@@ -755,17 +757,36 @@ trait JdbcEncoder0LowPriorityImplicits { self =>
         acc ++ (if (acc == SqlFragment.nullLiteral) SqlFragment.nullLiteral else SqlFragment.comma) ++ sql"""${key
           .encode(k)}: ${value.encode(v)}"""
       }
+
+    override def deriveUnknown[A: ClassTag](
+      summoned: => Option[JdbcEncoder[A]]
+    ): JdbcEncoder[A] = {
+      val classTag = implicitly[ClassTag[A]]
+      println(s"===== arrived at deriveUnknown with classTag: $classTag =====")
+      if (classTag == scala.reflect.classTag[zio.json.ast.Json]) {
+        new JdbcEncoder[zio.json.ast.Json] {
+          override def encode(value: zio.json.ast.Json): SqlFragment =
+            sql"""'${value.toString}'"""
+        }.asInstanceOf[JdbcEncoder[Any]]
+      } else super.deriveUnknown(summoned)
+    }
   }.autoAcceptSummoned
 
   //scalafmt: { maxColumn = 325, optIn.configStyleArguments = false }
-  def fromSchema[A](implicit schema: Schema[A]): JdbcEncoder[A] =
+  def fromSchema[A: ClassTag](implicit schema: Schema[A]): JdbcEncoder[A] = {
     schema match {
       case Schema.Primitive(standardType, _) =>
         primitiveCodec(standardType)
-      case Schema.Optional(schema, _)        =>
-        JdbcEncoder.optionEncoder(self.fromSchema(schema))
-      case Schema.Tuple2(left, right, _)     =>
-        JdbcEncoder.tuple2Encoder(self.fromSchema(left), self.fromSchema(right))
+      case schemaOpt: Schema.Optional[a]        =>
+        implicit val optSchema: Schema[a] = schemaOpt.schema
+        implicit val ct: ClassTag[a] = ClassTag[a](classOf[Any])
+        JdbcEncoder.optionEncoder(self.fromSchema[a])
+      case schemaTuple: Schema.Tuple2[a, b]     =>
+        implicit val leftSchema: Schema[a] = schemaTuple.left
+        implicit val cta: ClassTag[a] = ClassTag[a](classOf[Any])
+        implicit val rightSchema: Schema[b] = schemaTuple.right
+        implicit val ctb: ClassTag[b] = ClassTag[b](classOf[Any])
+        JdbcEncoder.tuple2Encoder(self.fromSchema[a], self.fromSchema[b])
       // format: off
       case x@(
         _: Schema.CaseClass1[_, _] |
@@ -794,13 +815,55 @@ trait JdbcEncoder0LowPriorityImplicits { self =>
         // format: on
         caseClassEncoder(x.asInstanceOf[Schema.Record[A]].fields)
       case _                                 =>
-        throw JdbcEncoderError(s"Failed to encode schema ${schema}", new IllegalArgumentException)
+        val classTag = implicitly[ClassTag[A]].runtimeClass
+        println(s"@@@@ classTag: $classTag")
+        if (classTag == classOf[zio.json.ast.Json])
+          jsonEncoder().asInstanceOf[JdbcEncoder[A]]
+        else
+          throw JdbcEncoderError(s"Failed to encode schema ${schema}", new IllegalArgumentException)
     }
+  }
 
-  private[jdbc] def caseClassEncoder[A](fields: Chunk[Schema.Field[A, _]]): JdbcEncoder[A] = { (a: A) =>
-    fields.map { f =>
-      val encoder = self.fromSchema(f.schema.asInstanceOf[Schema[Any]])
-      encoder.encode(f.get(a))
+  // private[jdbc] def caseClassEncoder[A: ClassTag](fields: Chunk[Schema.Field[A, _]])(implicit schema: Schema[A]): JdbcEncoder[A] = { (a: A) =>
+  //   fields.map { f =>
+  //     val encoder = self.fromSchema[f.FieldType](f.schema)
+  //     encoder.encode(f.get(a))
+  //   }.reduce(_ ++ SqlFragment.comma ++ _)
+  // }
+  private[jdbc] def caseClassEncoder[A: ClassTag](fields: Chunk[Schema.Field[A, _]])(implicit schema: Schema[A]): JdbcEncoder[A] = { (a: A) =>
+    fields.map { field =>
+      val fieldSchema = field.schema.asInstanceOf[Schema[Any]] // Adjust type as necessary
+      encodeField[A, Any](field.asInstanceOf[Schema.Field[A, Any]], a)(implicitly[ClassTag[Any]], fieldSchema)
     }.reduce(_ ++ SqlFragment.comma ++ _)
   }
+
+  private[jdbc] def encodeField[A, B : ClassTag](field: Schema.Field[A, B], value: A)(implicit schema: Schema[B]): SqlFragment = {
+    val encoder = self.fromSchema[B]
+    encoder.encode(field.get(value))
+  }
+
+//  private[jdbc] def jsonTransformEncoder[A, B](in: Schema[DynamicValue])(implicit toJson: B => Either[String, B]): JdbcEncoder[B] = {
+//    println("@@@@ did we get into jsonTransformEncoder?")
+//    (b : B) =>
+//      val encoder: JdbcEncoder[A] = in match {
+//        case enum: Schema.Enum[_] => throw JdbcEncoderError(s"Failed to encode schema ${enum}", new IllegalArgumentException)
+//        case record: Schema.Record[_] => throw JdbcEncoderError(s"Failed to encode schema ${record}", new IllegalArgumentException)
+//        case collection: Schema.Collection[_, _] => throw JdbcEncoderError(s"Failed to encode schema ${collection}", new IllegalArgumentException)
+//        case Schema.Transform(schema, f, g, annotations, identity) => throw JdbcEncoderError(s"Failed to encode schema ${schema}", new IllegalArgumentException)
+//        case primitive@Schema.Primitive(standardType, annotations) => throw JdbcEncoderError(s"Failed to encode schema ${primitive}", new IllegalArgumentException)
+////        case optional@Schema.Optional(schema, annotations) => throw JdbcEncoderError(s"Failed to encode schema ${optional}", new IllegalArgumentException)
+//        case fail@Schema.Fail(message, annotations) => throw JdbcEncoderError(s"Failed to encode schema ${fail}", new IllegalArgumentException)
+////        case Schema.Tuple2(left, right, annotations) => ???
+////        case Schema.Either(left, right, annotations) => ???
+////        case Schema.Fallback(left, right, fullDecode, annotations) => ???
+//        case l@Schema.Lazy(schema0) =>  throw JdbcEncoderError(s"Failed to encode schema ${l}", new IllegalArgumentException)// self.fromSchema(schema0.asInstanceOf[Schema[Any]])
+//        case Schema.Dynamic(annotations) => self.fromSchema(in.asInstanceOf[Schema[Any]])
+//      }
+//      toJson(b) match {
+//        case Right(b) => encoder.encode(b) //sql"$a::json"
+//        case Left(error) => throw JdbcEncoderError(s"[jsonEncoder] Failed to convert $a to json: $error", new IllegalArgumentException)
+//      }
+//  }
+  private[jdbc] def jsonEncoder(): JdbcEncoder[zio.json.ast.Json] =
+    (value: zio.json.ast.Json) => sql"${value.toString}::json"
 }
